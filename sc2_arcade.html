@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SC2 Arcade Lobby Monitor</title>
+<style>
+  :root {
+    --bg:        #080d14;
+    --bg2:       #0f1724;
+    --bg3:       #162030;
+    --border:    #1e3050;
+    --accent:    #1a8cff;
+    --accent2:   #0d5fb0;
+    --text:      #c4d4e8;
+    --text-dim:  #5a7a9a;
+    --text-head: #e8f2ff;
+    --green:     #1aaa55;
+    --yellow:    #d4a017;
+    --red:       #c0392b;
+    --card-w:    320px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+  }
+
+  /* ── header ── */
+  header {
+    background: linear-gradient(180deg, #0a1628 0%, var(--bg2) 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 18px 24px 14px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(8px);
+  }
+
+  .logo {
+    width: 36px; height: 36px;
+    background: var(--accent);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+
+  .header-title h1 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-head);
+    letter-spacing: 0.02em;
+  }
+  .header-title p {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  .header-status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+  }
+
+  .pulse {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s infinite;
+  }
+  .pulse.refreshing { background: var(--accent); animation: spin-pulse 1s linear infinite; }
+  .pulse.error      { background: var(--red); animation: none; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.5; transform: scale(0.8); }
+  }
+  @keyframes spin-pulse {
+    0%   { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  /* ── controls ── */
+  .controls {
+    padding: 14px 24px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .region-tabs {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .tab {
+    padding: 5px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .tab:hover  { border-color: var(--accent); color: var(--text); }
+  .tab.active {
+    background: var(--accent2);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 500;
+  }
+  .tab .count {
+    background: rgba(255,255,255,0.12);
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-left: 5px;
+    font-size: 0.72rem;
+  }
+
+  .search-box {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .search-box input {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    width: 200px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .search-box input:focus { border-color: var(--accent); }
+  .search-box input::placeholder { color: var(--text-dim); }
+
+  /* ── stats bar ── */
+  .stats-bar {
+    padding: 8px 24px;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .stats-bar span b { color: var(--text); }
+
+  /* ── grid ── */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--card-w), 1fr));
+    gap: 14px;
+    padding: 20px 24px;
+  }
+
+  /* ── card ── */
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: border-color 0.15s, transform 0.1s;
+    cursor: default;
+    animation: fadeIn 0.2s ease;
+  }
+  .card:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+  }
+  .card.fresh  { border-left: 3px solid var(--green); }
+  .card.today  { border-left: 3px solid var(--accent); }
+  .card.week   { border-left: 3px solid #8855cc; }
+  .card.cached { border-left: 3px solid var(--border); opacity: 0.85; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .card-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-head);
+    line-height: 1.3;
+    word-break: break-word;
+  }
+
+  .card-desc {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .card-desc:empty { display: none; }
+
+  .card-footer {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: auto;
+  }
+
+  .badge {
+    font-size: 0.68rem;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  .badge-locale { background: #1a2a40; color: #6ea8d8; }
+  .badge-live   { background: #0f2e1a; color: #3caa60; }
+  .badge-today  { background: #0d2040; color: #4090d0; }
+  .badge-week   { background: #1e1030; color: #9966dd; }
+  .badge-cached { background: #1a1a1a; color: #556677; }
+
+  .card-time {
+    margin-left: auto;
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  /* locale color overrides */
+  .locale-enUS, .locale-enGB { background: #0f2040; color: #5baaff; }
+  .locale-koKR                { background: #2a1520; color: #ff7a9a; }
+  .locale-ruRU                { background: #1a2510; color: #7ac950; }
+  .locale-zhCN, .locale-zhTW  { background: #2a1a08; color: #ffa050; }
+  .locale-deDE, .locale-frFR, .locale-plPL,
+  .locale-itIT, .locale-esES, .locale-esMX,
+  .locale-ptBR                { background: #221a2a; color: #c080e0; }
+
+  /* ── empty state ── */
+  .empty {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-dim);
+  }
+  .empty h2 { font-size: 1.1rem; margin-bottom: 8px; color: var(--text); }
+  .empty p  { font-size: 0.85rem; line-height: 1.6; }
+
+  /* ── footer ── */
+  footer {
+    text-align: center;
+    padding: 20px;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🎮</div>
+  <div class="header-title">
+    <h1>SC2 Arcade Lobby Monitor</h1>
+    <p id="subtitle">Connecting to local monitor…</p>
+  </div>
+  <div class="header-status">
+    <div class="pulse" id="pulse"></div>
+    <span id="refresh-label">–</span>
+  </div>
+</header>
+
+<div class="controls">
+  <div class="region-tabs" id="region-tabs">
+    <button class="tab active" data-region="all">🌐 All <span class="count" id="cnt-all">–</span></button>
+    <button class="tab" data-region="_live">🟢 Live <span class="count" id="cnt-live">–</span></button>
+    <button class="tab" data-region="english">🇺🇸 English <span class="count" id="cnt-english">–</span></button>
+    <button class="tab" data-region="korean">🇰🇷 Korean <span class="count" id="cnt-korean">–</span></button>
+    <button class="tab" data-region="russian">🇷🇺 Russian <span class="count" id="cnt-russian">–</span></button>
+    <button class="tab" data-region="chinese">🇨🇳 Chinese <span class="count" id="cnt-chinese">–</span></button>
+    <button class="tab" data-region="european">🌍 EU/LatAm <span class="count" id="cnt-european">–</span></button>
+    <button class="tab" data-region="other">Other <span class="count" id="cnt-other">–</span></button>
+  </div>
+  <div class="search-box">
+    <input type="text" id="search" placeholder="Search games…" oninput="renderCards()">
+  </div>
+</div>
+
+<div class="stats-bar" id="stats-bar">
+  <span>Loading…</span>
+</div>
+
+<div class="grid" id="grid">
+  <div class="empty">
+    <h2>Connecting…</h2>
+    <p>Make sure sc2_cache_monitor.py is running.</p>
+  </div>
+</div>
+
+<footer>
+  SC2 Arcade Monitor — data from local SC2 cache &nbsp;·&nbsp;
+  <a href="http://localhost:8080/lobbies/active" target="_blank" style="color: var(--accent);">Raw API</a>
+</footer>
+
+<script>
+  const API = 'http://localhost:8080';
+  const REFRESH_MS = 8000;
+
+  let allLobbies = [];
+  let regionCounts = {};
+  let activeRegion = 'all';
+  let lastUpdated = null;
+  let refreshInterval = null;
+
+  // ── fetch ──────────────────────────────────────────────────────────────────
+
+  async function fetchLobbies() {
+    setPulse('refreshing');
+    try {
+      // Always fetch all; filter client-side (except region which reduces API payload)
+      const regionParam = (activeRegion && !activeRegion.startsWith('_'))
+        ? `?region=${activeRegion}` : '';
+      const res  = await fetch(`${API}/lobbies/active${regionParam}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      allLobbies  = data.lobbies || [];
+      lastUpdated = new Date();
+
+      updateCountBadges(allLobbies, data.region_counts);
+      updateStatsBar(data);
+      renderCards();
+      setPulse('ok');
+
+      const live  = allLobbies.filter(l => l.freshness === 'live').length;
+      const total = allLobbies.length;
+      document.getElementById('subtitle').textContent =
+        `US Region · ${total} games in cache · ${live} live`;
+
+    } catch (e) {
+      setPulse('error');
+      document.getElementById('refresh-label').textContent = 'Connection error';
+      document.getElementById('grid').innerHTML = `
+        <div class="empty">
+          <h2>Cannot reach monitor</h2>
+          <p>Make sure sc2_cache_monitor.py is running on port 8080.<br>
+          <code>python3 sc2_cache_monitor.py</code></p>
+        </div>`;
+    }
+  }
+
+  // ── render ─────────────────────────────────────────────────────────────────
+
+  function renderCards() {
+    const query = document.getElementById('search').value.trim().toLowerCase();
+
+    let visible = allLobbies;
+
+    // Client-side live filter
+    if (activeRegion === '_live') {
+      visible = visible.filter(l => l.freshness === 'live' || l.freshness === 'today');
+    }
+
+    if (query) {
+      visible = visible.filter(l =>
+        l.name.toLowerCase().includes(query) ||
+        (l.description || '').toLowerCase().includes(query)
+      );
+    }
+
+    const grid = document.getElementById('grid');
+    if (visible.length === 0) {
+      grid.innerHTML = `
+        <div class="empty">
+          <h2>No lobbies found</h2>
+          <p>${query
+            ? 'No games match your search.'
+            : activeRegion === '_live'
+              ? 'No live games yet — scroll the arcade browser in SC2 to populate.'
+              : 'Open SC2 and browse the Custom Games list to populate data.'
+          }</p>
+        </div>`;
+      return;
+    }
+
+    const FRESHNESS_LABEL = {
+      live:   '<span class="badge badge-live">● Live</span>',
+      today:  '<span class="badge badge-today">● Today</span>',
+      week:   '<span class="badge badge-week">● This week</span>',
+      cached: '<span class="badge badge-cached">Cached</span>',
+    };
+
+    grid.innerHTML = visible.map(lobby => {
+      const f      = lobby.freshness || 'cached';
+      const agoStr = formatAgo(lobby.last_seen_ago_s);
+      const locale = lobby.best_locale || '';
+      const desc   = cleanDesc(lobby.description || '');
+
+      return `
+        <div class="card ${f}">
+          <div class="card-name">${escHtml(lobby.name)}</div>
+          ${desc ? `<div class="card-desc">${escHtml(desc)}</div>` : ''}
+          <div class="card-footer">
+            ${locale ? `<span class="badge badge-locale locale-${locale}">${locale}</span>` : ''}
+            ${FRESHNESS_LABEL[f] || ''}
+            <span class="card-time">${agoStr}</span>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  // ── helpers ────────────────────────────────────────────────────────────────
+
+  function updateCountBadges(lobbies, regionCounts) {
+    const regions = ['english','korean','russian','chinese','european','other'];
+    regions.forEach(r => {
+      const el = document.getElementById(`cnt-${r}`);
+      if (el) el.textContent = regionCounts[r] || 0;
+    });
+    document.getElementById('cnt-all').textContent  = lobbies.length;
+    document.getElementById('cnt-live').textContent =
+      lobbies.filter(l => l.freshness === 'live' || l.freshness === 'today').length;
+  }
+
+  function updateStatsBar(data) {
+    const live  = allLobbies.filter(l => l.freshness === 'live').length;
+    const today = allLobbies.filter(l => l.freshness === 'today').length;
+    document.getElementById('stats-bar').innerHTML = `
+      <span><b>${data.count}</b> games in cache</span>
+      <span>🟢 <b>${live}</b> live  ·  🔵 <b>${today}</b> seen today</span>
+      <span>Updated: <b>${lastUpdated ? lastUpdated.toLocaleTimeString() : '–'}</b></span>
+      <span>Refreshes every <b>${REFRESH_MS/1000}s</b></span>`;
+    document.getElementById('refresh-label').textContent =
+      `Updated ${lastUpdated ? lastUpdated.toLocaleTimeString() : '–'}`;
+  }
+
+  function formatAgo(s) {
+    if (s < 5)   return 'just now';
+    if (s < 60)  return `${s | 0}s ago`;
+    if (s < 3600) return `${(s / 60) | 0}m ago`;
+    return `${(s / 3600).toFixed(1)}h ago`;
+  }
+
+  function cleanDesc(d) {
+    return d.replace(/<br\s*\/?>/gi, ' ').replace(/&lt;br&gt;/gi, ' ')
+            .replace(/\s+/g, ' ').trim();
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+            .replace(/"/g,'&quot;');
+  }
+
+  function setPulse(state) {
+    const p = document.getElementById('pulse');
+    p.className = 'pulse' + (state === 'refreshing' ? ' refreshing' : state === 'error' ? ' error' : '');
+  }
+
+  // ── region tabs ────────────────────────────────────────────────────────────
+
+  document.getElementById('region-tabs').addEventListener('click', async e => {
+    const btn = e.target.closest('.tab');
+    if (!btn) return;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    activeRegion = btn.dataset.region;
+    await fetchLobbies();
+  });
+
+  // ── boot ───────────────────────────────────────────────────────────────────
+
+  fetchLobbies();
+  refreshInterval = setInterval(fetchLobbies, REFRESH_MS);
+</script>
+</body>
+</html>
