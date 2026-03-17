@@ -8,12 +8,12 @@ variants so each unique game appears once, with all its known locales tracked.
 
 REST API at http://localhost:8080/lobbies/active
 """
-import os, sys, time, json, threading, xml.etree.ElementTree as ET
+import os, sys, time, json, threading, subprocess, xml.etree.ElementTree as ET
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 # ── config ────────────────────────────────────────────────────────────────────
-CACHE_DIR      = "/Users/Shared/Blizzard/Battle.net/Cache"
+CACHE_DIR      = "/home/kali/Games/battlenet/drive_c/ProgramData/Blizzard Entertainment/Battle.net/Cache"
 API_PORT       = 8080
 POLL_INTERVAL  = 3        # seconds between cache scans
 ACTIVE_WINDOW  = 0        # 0 = no time limit, show full cache
@@ -140,6 +140,14 @@ def scan_cache() -> int:
     return new_games
 
 
+def notify(title: str, body: str):
+    try:
+        subprocess.run(["notify-send", "-a", "SC2 Arcade Monitor", title, body],
+                       check=False, capture_output=True)
+    except FileNotFoundError:
+        pass  # notify-send not installed
+
+
 def scanner_loop():
     while True:
         try:
@@ -148,6 +156,8 @@ def scanner_loop():
                 with lock:
                     total = len(lobbies)
                 print(f"[cache] +{n} new games  total={total}")
+                notify(f"+{n} new arcade game{'s' if n != 1 else ''}",
+                       f"{total} total games in cache")
         except Exception as e:
             print(f"[cache] scan error: {e}")
         time.sleep(POLL_INTERVAL)
@@ -257,7 +267,6 @@ class APIHandler(BaseHTTPRequestHandler):
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def kill_port(port: int):
-    import subprocess
     for pid in subprocess.run(["lsof", "-t", f"-i:{port}"],
                               capture_output=True, text=True).stdout.split():
         try:

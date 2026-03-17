@@ -1,122 +1,151 @@
 #!/usr/bin/env python3
 """
-SC2 Arcade Auto-Scroller
-========================
-Periodically sends Page Down / Page Up keystrokes to the SC2 process so it
-continuously pages through the arcade lobby list, triggering .s2ml cache
-downloads that sc2_cache_monitor.py picks up.
+SC2 Arcade Refresher (Linux / xdotool)
+=======================================
+Periodically clicks the arcade lobby refresh button in SC2 via xdotool.
+Coordinates are stored relative to the SC2 window, so they survive window
+moves. The real cursor is saved and restored around each click.
 
-Runs in the background — does NOT need SC2 to be the active window.
+SC2 does NOT need to be the active/focused window.
 
 Requirements:
-  - SC2 must be open on the Custom Games / arcade browser screen
-  - Terminal (or the app running this) needs Accessibility access:
-      System Settings > Privacy & Security > Accessibility
+  xdotool  (sudo apt install xdotool)
 
 Usage:
-  python3 sc2_arcade_scroller.py              # default settings
-  python3 sc2_arcade_scroller.py --interval 15 --pages 4
+  # One-time calibration — hover over the refresh button, press Enter:
+  python3 sc2_arcade_scroller.py --calibrate
+
+  # Run with saved or manually specified coordinates:
+  python3 sc2_arcade_scroller.py
+  python3 sc2_arcade_scroller.py --x 120 --y 38 --interval 30
 """
-import subprocess, time, sys, argparse
+import subprocess, time, sys, argparse, os, json
 
-SC2_PROCESS   = "SC2"
-DEFAULT_INTERVAL = 20    # seconds between scroll bursts
-DEFAULT_PAGES    = 3     # page downs per burst before resetting
-KEY_PAGE_DOWN    = 121
-KEY_PAGE_UP      = 116
+WINDOW_NAME      = "StarCraft II"
+DEFAULT_INTERVAL = 30
+COORD_FILE       = os.path.join(os.path.dirname(__file__), ".refresh_coords.json")
 
-def is_sc2_running() -> bool:
-    r = subprocess.run(
-        ["osascript", "-e",
-         f'tell application "System Events" to get name of every process whose name is "{SC2_PROCESS}"'],
-        capture_output=True, text=True)
-    return SC2_PROCESS in r.stdout
 
-def send_key(key_code: int, count: int = 1, delay: float = 0.15):
-    """Activate SC2, send keystrokes, then restore the previously active app."""
-    script = f'''
-set previousApp to name of (info for (path to frontmost application))
-tell application "{SC2_PROCESS}" to activate
-delay 0.3
-tell application "System Events"
-    tell process "{SC2_PROCESS}"
-        repeat {count} times
-            key code {key_code}
-            delay {delay}
-        end repeat
-    end tell
-end tell
-delay 0.2
-try
-    tell application previousApp to activate
-end try
-'''
-    result = subprocess.run(["osascript", "-e", script],
-                            capture_output=True, text=True)
-    if result.returncode != 0:
-        err = result.stderr.strip()
-        if "not allowed" in err.lower() or "accessibility" in err.lower():
-            print("[!] Accessibility permission denied.")
-            print("    Go to: System Settings > Privacy & Security > Accessibility")
-            print("    Add Terminal (or whatever is running this script) to the list.")
-            return False
-        if err:
-            print(f"[warn] osascript: {err[:100]}")
-    return result.returncode == 0
+def xdo(*args) -> str:
+    r = subprocess.run(["xdotool", *args], capture_output=True, text=True)
+    return r.stdout.strip()
 
-def scroll_burst(pages: int):
-    """Page down N times, pause, then page back up."""
-    ok = send_key(KEY_PAGE_DOWN, count=pages)
-    if not ok:
-        return False
-    time.sleep(0.5)
-    send_key(KEY_PAGE_UP, count=pages)
-    return True
 
-def main():
-    parser = argparse.ArgumentParser(description="SC2 Arcade Auto-Scroller")
-    parser.add_argument("--interval", type=float, default=DEFAULT_INTERVAL,
-                        help=f"Seconds between scroll bursts (default: {DEFAULT_INTERVAL})")
-    parser.add_argument("--pages", type=int, default=DEFAULT_PAGES,
-                        help=f"Page-downs per burst (default: {DEFAULT_PAGES})")
-    parser.add_argument("--down-only", action="store_true",
-                        help="Don't page back up (keeps advancing through the list)")
-    args = parser.parse_args()
+def find_window() -> str | None:
+    wids = xdo("search", "--name", WINDOW_NAME).splitlines()
+    return wids[0] if wids else None
 
-    print(f"[+] SC2 Arcade Auto-Scroller")
-    print(f"[+] Interval: {args.interval}s  |  Pages per burst: {args.pages}")
-    print(f"[+] SC2 must be on the Custom Games / arcade browser screen")
-    print()
 
-    if not is_sc2_running():
-        print("[!] SC2 is not running. Start SC2 and go to Custom Games first.")
+def get_window_geometry(wid: str) -> tuple[int, int]:
+    """Return (x, y) top-left of window in screen coordinates."""
+    out = xdo("getwindowgeometry", "--shell", wid)
+    vals = dict(line.split("=") for line in out.splitlines() if "=" in line)
+    return int(vals["X"]), int(vals["Y"])
+
+
+def get_mouse() -> tuple[int, int]:
+    out = xdo("getmouselocation", "--shell")
+    vals = dict(line.split("=") for line in out.splitlines() if "=" in line)
+    return int(vals["X"]), int(vals["Y"])
+
+
+def click_in_window(wid: str, rel_x: int, rel_y: int):
+    """Click at window-relative (rel_x, rel_y), restoring cursor afterwards."""
+    wx, wy = get_window_geometry(wid)
+    abs_x, abs_y = wx + rel_x, wy + rel_y
+
+    saved = get_mouse()
+
+    xdo("mousemove", "--sync", str(abs_x), str(abs_y))
+    time.sleep(0.05)
+    xdo("click", "1")
+    time.sleep(0.05)
+
+    xdo("mousemove", "--sync", str(saved[0]), str(saved[1]))
+
+
+def save_coords(rel_x: int, rel_y: int):
+    with open(COORD_FILE, "w") as f:
+        json.dump({"rel_x": rel_x, "rel_y": rel_y}, f)
+
+
+def load_coords() -> tuple[int, int] | None:
+    if not os.path.exists(COORD_FILE):
+        return None
+    with open(COORD_FILE) as f:
+        d = json.load(f)
+    return d["rel_x"], d["rel_y"]
+
+
+def calibrate():
+    wid = find_window()
+    if not wid:
+        print(f"[!] SC2 window '{WINDOW_NAME}' not found. Is SC2 running?")
         sys.exit(1)
 
-    print(f"[+] SC2 found. Starting scroll loop...")
+    print("[calibrate] Switch to SC2 and hover over the refresh button.")
+    print("[calibrate] Press Enter to capture...")
+    input()
+
+    mx, my = get_mouse()
+    wx, wy = get_window_geometry(wid)
+    rel_x, rel_y = mx - wx, my - wy
+
+    save_coords(rel_x, rel_y)
+    print(f"[calibrate] Window origin: ({wx}, {wy})")
+    print(f"[calibrate] Mouse position: ({mx}, {my})")
+    print(f"[calibrate] Saved relative offset: ({rel_x}, {rel_y})")
+    print(f"[calibrate] Done. Run without --calibrate to start.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="SC2 Arcade Auto-Refresher (Linux)")
+    parser.add_argument("--calibrate", action="store_true",
+                        help="Capture the refresh button position interactively")
+    parser.add_argument("--interval", type=float, default=DEFAULT_INTERVAL,
+                        help=f"Seconds between clicks (default: {DEFAULT_INTERVAL})")
+    parser.add_argument("--x", type=int, help="Refresh button X offset from window left edge")
+    parser.add_argument("--y", type=int, help="Refresh button Y offset from window top edge")
+    args = parser.parse_args()
+
+    if args.calibrate:
+        calibrate()
+        return
+
+    if args.x is not None and args.y is not None:
+        rel_x, rel_y = args.x, args.y
+    else:
+        coords = load_coords()
+        if not coords:
+            print("[!] No coordinates saved. Run with --calibrate first.")
+            sys.exit(1)
+        rel_x, rel_y = coords
+
+    wid = find_window()
+    if not wid:
+        print(f"[!] SC2 window '{WINDOW_NAME}' not found. Is SC2 running?")
+        sys.exit(1)
+
+    print(f"[+] SC2 Arcade Auto-Refresher")
+    print(f"[+] Clicking at window offset ({rel_x}, {rel_y}) every {args.interval}s")
+    print(f"[+] SC2 must be on the Custom Games / arcade browser screen")
     print(f"[!] Ctrl+C to stop")
     print()
 
-    page_position = 0
-    bursts = 0
-
+    clicks = 0
     while True:
-        if not is_sc2_running():
-            print("[!] SC2 is no longer running. Waiting...")
+        wid = find_window()
+        if not wid:
+            print("[!] SC2 window lost. Waiting...")
             time.sleep(10)
             continue
 
-        if args.down_only:
-            ok = send_key(KEY_PAGE_DOWN, count=args.pages)
-            page_position += args.pages
-        else:
-            ok = scroll_burst(args.pages)
-
-        if ok:
-            bursts += 1
-            print(f"[scroll] burst #{bursts}  page_pos≈{page_position}  "
-                  f"({time.strftime('%H:%M:%S')})")
+        click_in_window(wid, rel_x, rel_y)
+        clicks += 1
+        print(f"[refresh] click #{clicks}  ({time.strftime('%H:%M:%S')})")
 
         time.sleep(args.interval)
+
 
 if __name__ == "__main__":
     try:
