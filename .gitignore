@@ -4,3 +4,5 @@ __pycache__/
 *.pcapng
 *.log
 .refresh_coords.json
+capture/keylog.txt
+capture/*.pcapng
